@@ -3,7 +3,7 @@ import './App.css';
 
 // API Configuration
 const API_CONFIG = {
-  apiUrl: process.env.REACT_APP_API_URL ,
+  apiUrl: process.env.REACT_APP_API_URL,
   cognitoUserPoolId: process.env.REACT_APP_COGNITO_USER_POOL_ID,
   cognitoClientId: process.env.REACT_APP_COGNITO_CLIENT_ID,
   region: process.env.REACT_APP_AWS_REGION,
@@ -912,7 +912,7 @@ const HomePage = ({ setCurrentPage, currentUser, basket, delivery, history, hand
               <div className="categories-grid">
                 {categories.map(cat => (
                   <button key={cat} className="category-card" onClick={() => handleCategoryClick(cat)}>
-                    <div className="category-icon">🪑</div>
+                    <div className="category-icon">🪵</div>
                     <p>{cat}</p>
                   </button>
                 ))}
