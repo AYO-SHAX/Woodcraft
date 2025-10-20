@@ -3,11 +3,11 @@ import './App.css';
 
 // API Configuration
 const API_CONFIG = {
-  apiUrl: process.env.REACT_APP_API_URL || 'https://izt5odf18k.execute-api.us-east-1.amazonaws.com/prod',
-  cognitoUserPoolId: process.env.REACT_APP_COGNITO_USER_POOL_ID || 'us-east-1_li4dKTmnV',
-  cognitoClientId: process.env.REACT_APP_COGNITO_CLIENT_ID || '5c8rbs7qa81nqh7bugnkjehgb5',
-  region: process.env.REACT_APP_AWS_REGION || 'us-east-1',
-  s3BucketUrl: process.env.REACT_APP_S3_BUCKET_URL || 'https://furniture-app-backend-images-prod.s3.amazonaws.com'
+  apiUrl: process.env.REACT_APP_API_URL ,
+  cognitoUserPoolId: process.env.REACT_APP_COGNITO_USER_POOL_ID,
+  cognitoClientId: process.env.REACT_APP_COGNITO_CLIENT_ID,
+  region: process.env.REACT_APP_AWS_REGION,
+  s3BucketUrl: process.env.REACT_APP_S3_BUCKET_URL
 };
 
 // API Service Functions
