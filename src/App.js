@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback} from 'react';
 import './App.css';
 
 // API Configuration
@@ -972,31 +972,29 @@ const ChatPage = ({ currentUser, authToken, setCurrentPage, handleLogout, isAdmi
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const loadConversations = useCallback(async () => {
+    const result = await apiService.getConversations(authToken);
+    if (result.success) 
+      setConversations(result.data);
+    }, [authToken]);
+
+  const loadMessages = useCallback(async (otherUserId) => {
+    const result = await apiService.getMessages(otherUserId, authToken);
+    if (result.success) 
+      setMessages(result.data);
+    }, [authToken]);
+
   useEffect(() => {
     loadConversations();
-  }, []);
+  }, [loadConversations]);
 
   useEffect(() => {
     if (selectedConversation) {
       loadMessages(selectedConversation.otherUserId);
-      const interval = setInterval(() => loadMessages(selectedConversation.otherUserId), 3000);
+      const interval = setInterval(() => {loadMessages(selectedConversation.otherUserId);}, 3000);
       return () => clearInterval(interval);
     }
-  }, [selectedConversation]);
-
-  const loadConversations = async () => {
-    const result = await apiService.getConversations(authToken);
-    if (result.success) {
-      setConversations(result.data);
-    }
-  };
-
-  const loadMessages = async (otherUserId) => {
-    const result = await apiService.getMessages(otherUserId, authToken);
-    if (result.success) {
-      setMessages(result.data);
-    }
-  };
+  }, [selectedConversation, loadMessages]);
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedConversation) return;
@@ -1164,25 +1162,24 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
   const canvasRef = useRef(null);
   const pollIntervalRef = useRef(null);
 
-  useEffect(() => {
-    checkAIAccess();
-    const interval = setInterval(checkAIAccess, 60000);
-    return () => {
-      clearInterval(interval);
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-      }
-    };
-  }, []);
-
-  const checkAIAccess = async () => {
+  const checkAIAccess = useCallback(async () => {
     const result = await apiService.checkAIAccess(authToken);
     if (result.success) {
       setHasAIAccess(result.hasAccess);
       setAccessTimeRemaining(result.timeRemaining);
       setAccessRequested(result.requestPending);
     }
-  };
+  }, [authToken]);
+
+  useEffect(() => {
+    checkAIAccess();
+    const interval = setInterval(checkAIAccess, 60000);
+    return () => {
+      clearInterval(interval);
+      if (pollIntervalRef.current)
+        clearInterval(pollIntervalRef.current);
+    };
+  }, [checkAIAccess]);
 
   const handleRequestAccess = async () => {
     const result = await apiService.requestAIAccess(authToken);
@@ -1712,18 +1709,18 @@ const AdminPage = ({ authToken, customRequests, setCustomRequests, delivery, set
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectingRequest, setRejectingRequest] = useState(null);
 
-  useEffect(() => {
-    loadAIAccessRequests();
-    const interval = setInterval(loadAIAccessRequests, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const loadAIAccessRequests = async () => {
+  const loadAIAccessRequests = useCallback(async () => {
     const result = await apiService.getAIAccessRequests(authToken);
     if (result.success) {
       setAiAccessRequests(result.data);
     }
-  };
+  }, [authToken]);
+
+  useEffect(() => {
+    loadAIAccessRequests();
+    const interval = setInterval(loadAIAccessRequests, 30000);
+    return () => clearInterval(interval);
+  }, [loadAIAccessRequests]);
 
   const handleGrantAccess = async (userId) => {
     const hours = parseInt(accessHours);
