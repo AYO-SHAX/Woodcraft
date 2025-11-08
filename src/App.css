@@ -1075,3 +1075,25 @@ p {
     grid-template-columns: 1fr;
   }
 }
+
+/* Add this at the END of your existing App.css file */
+
+/* Progress bar animation for AI generation */
+@keyframes slideProgress {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+/* Pulse animation for loading states */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}

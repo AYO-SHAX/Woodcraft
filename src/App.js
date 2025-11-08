@@ -142,6 +142,18 @@ const apiService = {
     }
   },
 
+  // NEW METHOD - ADD THIS:
+  async getGenerationStatus(generationId, token) {
+    try {
+      const response = await fetch(`${API_CONFIG.apiUrl}/ai/generation/${generationId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      return await response.json();
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
   async requestAIAccess(token) {
     try {
       const response = await fetch(`${API_CONFIG.apiUrl}/ai/request-access`, {
@@ -1130,7 +1142,11 @@ const ChatPage = ({ currentUser, authToken, setCurrentPage, handleLogout, isAdmi
   );
 };
 
-// CUSTOM PAGE (keeping original with minor updates)
+// ===========================================
+// REPLACE YOUR EXISTING CustomPage COMPONENT WITH THIS
+// Keep everything else in your App.js the same!
+// ===========================================
+
 const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, setCustomRequests, history, setHistory, handleLogout }) => {
   const [mode, setMode] = useState('description');
   const [description, setDescription] = useState('');
@@ -1142,14 +1158,21 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
   const [hasAIAccess, setHasAIAccess] = useState(false);
   const [accessRequested, setAccessRequested] = useState(false);
   const [accessTimeRemaining, setAccessTimeRemaining] = useState(null);
+  const [generationProgress, setGenerationProgress] = useState('');
   const fileInputRef = useRef(null);
   const roomInputRef = useRef(null);
   const canvasRef = useRef(null);
+  const pollIntervalRef = useRef(null);
 
   useEffect(() => {
     checkAIAccess();
     const interval = setInterval(checkAIAccess, 60000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
   }, []);
 
   const checkAIAccess = async () => {
@@ -1164,10 +1187,10 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
   const handleRequestAccess = async () => {
     const result = await apiService.requestAIAccess(authToken);
     if (result.success) {
-      alert('Access request sent to admin!');
+      alert('✅ Access request sent to admin!');
       setAccessRequested(true);
     } else {
-      alert('Failed to request access');
+      alert('❌ Failed to request access: ' + (result.error || 'Unknown error'));
     }
   };
 
@@ -1180,7 +1203,7 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
     };
     const result = await apiService.createCustomRequest(request, authToken);
     if (result.success) {
-      alert('Request sent to admin!');
+      alert('✅ Request sent to admin!');
       setDescription('');
       setUserPreferences(['']);
     }
@@ -1197,7 +1220,7 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
           preferences: userPreferences.filter(p => p.trim())
         };
         apiService.createCustomRequest(request, authToken);
-        alert('Image sent to admin!');
+        alert('✅ Image sent to admin!');
       };
       reader.readAsDataURL(file);
     }
@@ -1216,31 +1239,100 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
 
   const handleAIGenerate = async () => {
     if (!roomImage || !prompt) {
-      alert('Please upload room image and enter prompt');
+      alert('⚠️ Please upload room image and enter prompt');
       return;
     }
     
     if (!hasAIAccess) {
-      alert('You need AI access to generate images. Please request access first.');
+      alert('🔒 You need AI access to generate images. Please request access first.');
       return;
     }
 
     setLoading(true);
-    const result = await apiService.generateAIImage(roomImage, prompt, authToken);
+    setGenerationProgress('🚀 Starting AI generation...');
     
-    if (result.success) {
-      const protectedImage = await addWatermarkAndProtection(result.imageUrl);
-      setGeneratedImage(protectedImage);
-      setHistory([...history, {
-        id: Date.now(),
-        image: protectedImage,
-        prompt: prompt,
-        date: new Date().toISOString()
-      }]);
-    } else {
-      alert(result.error || 'Failed to generate image');
+    // Step 1: Start the generation
+    const startResult = await apiService.generateAIImage(roomImage, prompt, authToken);
+    
+    if (!startResult.success) {
+      alert('❌ Failed to start generation: ' + (startResult.error || 'Unknown error'));
+      setLoading(false);
+      setGenerationProgress('');
+      return;
     }
-    setLoading(false);
+
+    const generationId = startResult.generationId;
+    console.log('✅ Generation started:', generationId);
+    setGenerationProgress('🔍 Analyzing your room with AI Vision...');
+
+    // Step 2: Poll for completion
+    let pollCount = 0;
+    const maxPolls = 50; // 50 polls * 3 seconds = 2.5 minutes max
+    
+    pollIntervalRef.current = setInterval(async () => {
+      pollCount++;
+      
+      // Update progress message
+      if (pollCount === 5) {
+        setGenerationProgress('🎨 Generating your design with DALL-E 3...');
+      } else if (pollCount === 10) {
+        setGenerationProgress('✨ Almost there... creating your custom design...');
+      } else if (pollCount > 15 && pollCount % 5 === 0) {
+        setGenerationProgress(`⏳ Still generating... (${pollCount * 3} seconds elapsed)`);
+      }
+
+      const statusResult = await apiService.getGenerationStatus(generationId, authToken);
+      
+      if (!statusResult.success) {
+        console.error('❌ Status check failed:', statusResult.error);
+        return;
+      }
+
+      if (statusResult.data) {
+        const generation = statusResult.data;
+        console.log('📊 Generation status:', generation.status);
+        
+        if (generation.status === 'completed') {
+          clearInterval(pollIntervalRef.current);
+          setLoading(false);
+          setGenerationProgress('');
+          
+          console.log('✅ Generation completed! Image URL:', generation.generatedImageUrl);
+          
+          // Add watermark protection
+          const protectedImage = await addWatermarkAndProtection(generation.generatedImageUrl);
+          setGeneratedImage(protectedImage);
+          
+          setHistory([...history, {
+            id: Date.now(),
+            image: protectedImage,
+            prompt: prompt,
+            date: new Date().toISOString(),
+            roomAnalysis: generation.roomAnalysis
+          }]);
+          
+          alert('✨ Image generated successfully!');
+          
+        } else if (generation.status === 'failed') {
+          clearInterval(pollIntervalRef.current);
+          setLoading(false);
+          setGenerationProgress('');
+          alert('❌ Generation failed: ' + (generation.error || 'Unknown error. Please try again.'));
+        } else if (generation.status === 'generating') {
+          // Still processing - Vision completed, DALL-E in progress
+          if (pollCount === 8) {
+            setGenerationProgress('🎨 Room analyzed! Now generating your design...');
+          }
+        }
+      }
+
+      if (pollCount >= maxPolls) {
+        clearInterval(pollIntervalRef.current);
+        setLoading(false);
+        setGenerationProgress('');
+        alert('⏱️ Generation timed out after 2.5 minutes.\n\nPossible causes:\n• OpenAI API is experiencing delays\n• Your API key has rate limits\n• The request failed\n\nPlease try again or contact support.');
+      }
+    }, 3000);
   };
 
   const addWatermarkAndProtection = async (imageUrl) => {
@@ -1254,9 +1346,13 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
         canvas.width = img.width;
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
+        
+        // Add watermark
         ctx.font = '30px Arial';
         ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
         ctx.fillText('WoodCraft Studio - Confidential', 50, 50);
+        
+        // Add diagonal watermark
         ctx.save();
         ctx.translate(canvas.width / 2, canvas.height / 2);
         ctx.rotate(-Math.PI / 4);
@@ -1264,7 +1360,12 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
         ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
         ctx.fillText('PREVIEW ONLY', -200, 0);
         ctx.restore();
+        
         resolve(canvas.toDataURL());
+      };
+      img.onerror = () => {
+        console.error('❌ Failed to load image for watermark');
+        resolve(imageUrl); // Return original if watermark fails
       };
       img.src = imageUrl;
     });
@@ -1283,10 +1384,12 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
     
     const result = await apiService.createCustomRequest(request, authToken);
     if (result.success) {
-      alert('Design sent to admin with your preferences!');
+      alert('✅ Design sent to admin with your preferences!');
       setGeneratedImage(null);
       setPrompt('');
       setUserPreferences(['']);
+    } else {
+      alert('❌ Failed to send: ' + (result.error || 'Unknown error'));
     }
   };
 
@@ -1310,51 +1413,84 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
       <nav className="navbar">
         <div className="navbar-container">
           <button onClick={() => setCurrentPage('home')} className="back-button">← Back</button>
-          <div className="logo">Custom Woodwork</div>
+          <div className="logo">🎨 Custom Woodwork</div>
           <button onClick={handleLogout} className="btn btn-text">Logout</button>
         </div>
       </nav>
 
       <div className="container">
         <div className="mode-selector">
-          <button onClick={() => setMode('description')} className={`mode-btn ${mode === 'description' ? 'active' : ''}`}>Describe Idea</button>
-          <button onClick={() => setMode('upload')} className={`mode-btn ${mode === 'upload' ? 'active' : ''}`}>Upload Image</button>
+          <button onClick={() => setMode('description')} className={`mode-btn ${mode === 'description' ? 'active' : ''}`}>
+            📝 Describe Idea
+          </button>
+          <button onClick={() => setMode('upload')} className={`mode-btn ${mode === 'upload' ? 'active' : ''}`}>
+            📤 Upload Image
+          </button>
           <button onClick={() => setMode('ai-room')} className={`mode-btn ${mode === 'ai-room' ? 'active' : ''}`}>
-            🔒 AI Room Redesign {!hasAIAccess && '(Locked)'}
+            {hasAIAccess ? '✨ AI Room Redesign' : '🔒 AI Room Redesign (Locked)'}
           </button>
         </div>
 
         {mode === 'description' && (
           <div className="content-card">
             <h2>Describe Your Custom Piece</h2>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe your custom furniture..." rows="8" />
+            <p style={{color: '#6b7280', marginBottom: '1rem'}}>Tell us about your dream furniture piece</p>
+            <textarea 
+              value={description} 
+              onChange={(e) => setDescription(e.target.value)} 
+              placeholder="E.g., I want a rustic dining table made from reclaimed wood, 6 feet long, with a natural edge..." 
+              rows="8" 
+            />
             
-            <h3>Your Preferences</h3>
+            <h3 style={{marginTop: '1.5rem'}}>Your Preferences</h3>
             {userPreferences.map((pref, idx) => (
               <div key={idx} className="preference-row">
-                <input type="text" value={pref} onChange={(e) => updatePreference(idx, e.target.value)} placeholder={`Preference ${idx + 1}`} />
-                {userPreferences.length > 1 && <button onClick={() => removePreference(idx)} className="btn-remove">×</button>}
+                <input 
+                  type="text" 
+                  value={pref} 
+                  onChange={(e) => updatePreference(idx, e.target.value)} 
+                  placeholder={`Preference ${idx + 1} (e.g., dark walnut finish)`} 
+                />
+                {userPreferences.length > 1 && (
+                  <button onClick={() => removePreference(idx)} className="btn-remove">×</button>
+                )}
               </div>
             ))}
-            <button onClick={addPreference} className="btn btn-outline btn-small">+ Add Preference</button>
-            <button onClick={handleDescriptionSubmit} className="btn btn-primary">Send to Admin</button>
+            <button onClick={addPreference} className="btn btn-outline btn-small" style={{marginTop: '0.5rem'}}>
+              + Add Preference
+            </button>
+            <button onClick={handleDescriptionSubmit} className="btn btn-primary btn-block" style={{marginTop: '1.5rem'}}>
+              📤 Send to Admin
+            </button>
           </div>
         )}
 
         {mode === 'upload' && (
           <div className="content-card">
             <h2>Upload Reference Image</h2>
+            <p style={{color: '#6b7280', marginBottom: '1rem'}}>Share a photo of furniture you'd like us to recreate</p>
             <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" style={{ display: 'none' }} />
-            <button onClick={() => fileInputRef.current?.click()} className="btn btn-primary">📤 Choose Image</button>
+            <button onClick={() => fileInputRef.current?.click()} className="btn btn-primary">
+              📤 Choose Image
+            </button>
             
-            <h3>Your Preferences</h3>
+            <h3 style={{marginTop: '1.5rem'}}>Your Preferences</h3>
             {userPreferences.map((pref, idx) => (
               <div key={idx} className="preference-row">
-                <input type="text" value={pref} onChange={(e) => updatePreference(idx, e.target.value)} placeholder={`Preference ${idx + 1}`} />
-                {userPreferences.length > 1 && <button onClick={() => removePreference(idx)} className="btn-remove">×</button>}
+                <input 
+                  type="text" 
+                  value={pref} 
+                  onChange={(e) => updatePreference(idx, e.target.value)} 
+                  placeholder={`Preference ${idx + 1}`} 
+                />
+                {userPreferences.length > 1 && (
+                  <button onClick={() => removePreference(idx)} className="btn-remove">×</button>
+                )}
               </div>
             ))}
-            <button onClick={addPreference} className="btn btn-outline btn-small">+ Add Preference</button>
+            <button onClick={addPreference} className="btn btn-outline btn-small" style={{marginTop: '0.5rem'}}>
+              + Add Preference
+            </button>
           </div>
         )}
 
@@ -1364,19 +1500,28 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
               <div className="content-card access-locked">
                 <div className="lock-icon">🔒</div>
                 <h2>AI Room Redesign - Access Required</h2>
-                <p>This premium feature requires special access to use our AI technology.</p>
+                <p style={{fontSize: '1.1rem', lineHeight: '1.6', marginBottom: '1.5rem'}}>
+                  This premium feature uses <strong>GPT-4 Vision</strong> to analyze your room and <strong>DALL-E 3</strong> to generate professional interior designs.
+                </p>
                 
                 {!accessRequested ? (
                   <>
-                    <button onClick={handleRequestAccess} className="btn btn-primary">Request Access</button>
-                    <div className="access-note">
-                      <p><strong>Note:</strong> To get access, please send payment for day-long access. Admin will approve your request and grant you time-limited access to this feature.</p>
+                    <button onClick={handleRequestAccess} className="btn btn-primary btn-large">
+                      🔓 Request Access
+                    </button>
+                    <div className="access-note" style={{marginTop: '1.5rem'}}>
+                      <p><strong>💡 How it works:</strong></p>
+                      <p>1. Request access (payment required)</p>
+                      <p>2. Admin approves and grants time-limited access</p>
+                      <p>3. Upload your room photo & describe your vision</p>
+                      <p>4. AI analyzes and generates professional designs</p>
                     </div>
                   </>
                 ) : (
                   <div className="access-pending">
-                    <p>⏳ Your access request is pending admin approval</p>
-                    <p>You'll be notified once admin grants you access</p>
+                    <h3>⏳ Request Pending</h3>
+                    <p>Your access request is waiting for admin approval.</p>
+                    <p>You'll receive an email notification once access is granted.</p>
                   </div>
                 )}
               </div>
@@ -1384,50 +1529,158 @@ const CustomPage = ({ setCurrentPage, currentUser, authToken, customRequests, se
               <div>
                 {accessTimeRemaining && (
                   <div className="access-timer">
-                    <p>⏱️ AI Access Time Remaining: <strong>{Math.floor(accessTimeRemaining / 60)} hours {accessTimeRemaining % 60} minutes</strong></p>
+                    <p>
+                      ⏱️ AI Access Time Remaining: 
+                      <strong style={{marginLeft: '0.5rem'}}>
+                        {Math.floor(accessTimeRemaining / 60)} hours {accessTimeRemaining % 60} minutes
+                      </strong>
+                    </p>
                   </div>
                 )}
                 
                 <div className="content-card">
-                  <h2>AI-Powered Room Redesign</h2>
+                  <h2>🎨 AI-Powered Room Redesign</h2>
+                  <p style={{color: '#6b7280', marginBottom: '1.5rem', fontSize: '1.05rem'}}>
+                    Upload your room photo and describe your vision. Our AI will analyze your space and create a professional interior design.
+                  </p>
+                  
                   <div className="form-group">
-                    <label>Room Photo</label>
-                    <input type="file" ref={roomInputRef} onChange={handleRoomImageUpload} accept="image/*" style={{ display: 'none' }} />
-                    <button onClick={() => roomInputRef.current?.click()} className="btn btn-outline">
+                    <label style={{fontSize: '1rem', fontWeight: '600'}}>1. Upload Room Photo</label>
+                    <input 
+                      type="file" 
+                      ref={roomInputRef} 
+                      onChange={handleRoomImageUpload} 
+                      accept="image/*" 
+                      style={{ display: 'none' }} 
+                    />
+                    <button 
+                      onClick={() => roomInputRef.current?.click()} 
+                      className="btn btn-outline"
+                      style={{marginTop: '0.5rem'}}
+                    >
                       📷 {roomImage ? 'Change Image' : 'Upload Room Photo'}
                     </button>
-                    {roomImage && <div className="image-preview"><img src={roomImage} alt="Room" /></div>}
+                    {roomImage && (
+                      <div className="image-preview" style={{marginTop: '1rem'}}>
+                        <img src={roomImage} alt="Room" style={{maxHeight: '300px'}} />
+                      </div>
+                    )}
                   </div>
 
-                  <div className="form-group">
-                    <label>Design Instructions</label>
-                    <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="E.g., Modern minimalist style with neutral colors, add comfortable seating..." rows="4" />
+                  <div className="form-group" style={{marginTop: '1.5rem'}}>
+                    <label style={{fontSize: '1rem', fontWeight: '600'}}>2. Describe Your Design Vision</label>
+                    <textarea 
+                      value={prompt} 
+                      onChange={(e) => setPrompt(e.target.value)} 
+                      placeholder="E.g., Transform this into a modern minimalist space with neutral colors, add comfortable seating, wooden furniture, and natural lighting. Include plants and a cozy reading nook." 
+                      rows="5"
+                      style={{marginTop: '0.5rem'}}
+                    />
+                    <p style={{fontSize: '0.875rem', color: '#6b7280', marginTop: '0.5rem'}}>
+                      💡 Tip: Be specific about colors, style, furniture types, and atmosphere you want.
+                    </p>
                   </div>
 
-                  <button onClick={handleAIGenerate} disabled={loading} className="btn btn-primary">
-                    {loading ? '✨ Generating...' : '✨ Generate AI Design'}
+                  {loading && generationProgress && (
+                    <div style={{
+                      background: 'linear-gradient(135deg, #e0f2fe 0%, #dbeafe 100%)',
+                      border: '2px solid #0ea5e9',
+                      borderRadius: '0.75rem',
+                      padding: '1.25rem',
+                      marginTop: '1.5rem',
+                      textAlign: 'center'
+                    }}>
+                      <p style={{ 
+                        margin: '0 0 0.75rem 0', 
+                        color: '#0369a1', 
+                        fontWeight: 600, 
+                        fontSize: '1.05rem' 
+                      }}>
+                        {generationProgress}
+                      </p>
+                      <div style={{
+                        width: '100%',
+                        height: '6px',
+                        background: '#bae6fd',
+                        borderRadius: '3px',
+                        overflow: 'hidden',
+                        position: 'relative'
+                      }}>
+                        <div style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          height: '100%',
+                          width: '100%',
+                          background: 'linear-gradient(90deg, #0ea5e9, #3b82f6, #0ea5e9)',
+                          backgroundSize: '200% 100%',
+                          animation: 'slideProgress 2s linear infinite'
+                        }}></div>
+                      </div>
+                    </div>
+                  )}
+
+                  <button 
+                    onClick={handleAIGenerate} 
+                    disabled={loading || !roomImage || !prompt} 
+                    className="btn btn-primary btn-block btn-large"
+                    style={{marginTop: '1.5rem'}}
+                  >
+                    {loading ? '✨ Generating... Please wait (20-40 seconds)' : '✨ Generate AI Design'}
                   </button>
                 </div>
 
                 {generatedImage && (
-                  <div className="content-card protected-image-container" onContextMenu={(e) => e.preventDefault()}>
-                    <div className="screenshot-warning">⚠️ Screenshots are tracked. This is a preview only.</div>
-                    <h3>Generated Design (Preview)</h3>
+                  <div className="content-card protected-image-container" onContextMenu={(e) => e.preventDefault()} style={{marginTop: '1.5rem'}}>
+                    <div className="screenshot-warning">
+                      ⚠️ This is a preview with watermarks. Final high-resolution image will be provided after order confirmation.
+                    </div>
+                    <h3>🎨 Your Generated Design</h3>
                     <div className="protected-image">
-                      <img src={generatedImage} alt="Generated" style={{ userSelect: 'none', pointerEvents: 'none' }} draggable="false" />
+                      <img 
+                        src={generatedImage} 
+                        alt="Generated" 
+                        style={{ 
+                          userSelect: 'none', 
+                          pointerEvents: 'none', 
+                          width: '100%', 
+                          borderRadius: '0.5rem',
+                          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+                        }} 
+                        draggable="false" 
+                      />
                     </div>
 
-                    <h3>Your Preferences for This Design</h3>
-                    <p className="note">Tell us what you want to keep, change, or remove:</p>
+                    <h3 style={{marginTop: '2rem'}}>✏️ Customize Your Design</h3>
+                    <p className="note">Tell us what you'd like to keep, change, or remove from this design:</p>
                     {userPreferences.map((pref, idx) => (
                       <div key={idx} className="preference-row">
-                        <input type="text" value={pref} onChange={(e) => updatePreference(idx, e.target.value)} placeholder={`E.g., Keep the sofa, change wall color to beige`} />
-                        {userPreferences.length > 1 && <button onClick={() => removePreference(idx)} className="btn-remove">×</button>}
+                        <input 
+                          type="text" 
+                          value={pref} 
+                          onChange={(e) => updatePreference(idx, e.target.value)} 
+                          placeholder={`E.g., Keep the sofa but change wall color to beige, add more plants`} 
+                        />
+                        {userPreferences.length > 1 && (
+                          <button onClick={() => removePreference(idx)} className="btn-remove">×</button>
+                        )}
                       </div>
                     ))}
-                    <button onClick={addPreference} className="btn btn-outline btn-small">+ Add Preference</button>
+                    <button 
+                      onClick={addPreference} 
+                      className="btn btn-outline btn-small"
+                      style={{marginTop: '0.5rem'}}
+                    >
+                      + Add Preference
+                    </button>
                     
-                    <button onClick={handleSendToAdmin} className="btn btn-success btn-block">📤 Send to Admin for Quote</button>
+                    <button 
+                      onClick={handleSendToAdmin} 
+                      className="btn btn-success btn-block btn-large"
+                      style={{marginTop: '1.5rem'}}
+                    >
+                      📤 Send to Admin for Quote & Production
+                    </button>
                   </div>
                 )}
               </div>
